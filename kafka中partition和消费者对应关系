@@ -1,13 +1,61 @@
 链接：http://www.jianshu.com/p/6233d5341dfe
 
 1个partition只能被同组的一个consumer消费，同组的consumer则起到均衡效果
-一个topic 可以配置几个partition，produce发送的消息分发到不同的partition中，consumer接受数据的时候是按照group来接受，kafka确保每个partition只能同一个group中的同一个consumer消费，如果想要重复消费，那么需要其他的组来消费。
+一个topic 可以配置几个partition，produce发送的消息分发到不同的partition中，consumer接受数据的时候是按照group来接受，
+kafka确保每个partition只能同一个group中的同一个consumer消费，如果想要重复消费，那么需要其他的组来消费。
 
 同一个partition内的消息只能被同一个组中的一个consumer消费。当消费者数量多于partition的数量时，多余的消费者空闲。
-也就是说如果只有一个partition你在同一组启动多少个consumer都没用，partition的数量决定了此topic在同一组中被可被均衡的程度，例如partition=4，则可在同一组中被最多4个consumer均衡消费。
+也就是说如果只有一个partition你在同一组启动多少个consumer都没用，partition的数量决定了此topic在同一组中被可被均衡的程度，
+例如partition=4，则可在同一组中被最多4个consumer均衡消费。
 
 partition少于消费者数量时，多余的消费者空闲。
 partition多于消费者数量时，消息按partition数量分布。
 partition与消费者数量相同时，消息在同一个组之间的消费者之间均分
 
 启动多个组，则会使同一个消息被消费多次。
+
+3、producer
+Producer发送消息到broker时，会根据Paritition机制选择将其存储到哪一个Partition。如果Partition机制设置合理，
+所有消息可以均匀分布到不同的Partition里，这样就实现了负载均衡。如果一个Topic对应一个文件，那这个文件所在的机器
+I/O将会成为这个Topic的性能瓶颈，而有了Partition后，不同的消息可以并行写入不同broker的不同Partition里，极大的
+提高了吞吐率。可以在$KAFKA_HOME/config/server.properties中通过配置项num.partitions来指定新建Topic的默认
+Partition数量，也可在创建Topic时通过参数指定，同时也可以在Topic创建之后通过Kafka提供的工具修改。
+ 
+在发送一条消息时，可以指定这条消息的key，Producer根据这个key和Partition机制来判断应该将这条消息发送到哪个Parition。
+Paritition机制可以通过指定Producer的paritition. class这一参数来指定，该class必须实现kafka.producer.Partitioner
+接口。本例中如果key可以被解析为整数则将对应的整数与Partition总数取余，该消息会被发送到该数对应的Partition。
+（每个Parition都会有个序号,序号从0开始）
+
+import kafka.producer.Partitioner;
+import kafka.utils.VerifiableProperties;
+ 
+public class JasonPartitioner<T> implements Partitioner {
+ 
+    public JasonPartitioner(VerifiableProperties verifiableProperties) {}
+ 
+    @Override
+    public int partition(Object key, int numPartitions) {
+        try {
+            int partitionNum = Integer.parseInt((String) key);
+            return Math.abs(Integer.parseInt((String) key) % numPartitions);
+        } catch (Exception e) {
+            return Math.abs(key.hashCode() % numPartitions);
+        }
+    }
+}
+如果将上例中的类作为partition.class，并通过如下代码发送20条消息（key分别为0，1，2，3）至topic3（包含4个Partition）。
+public void sendMessage() throws InterruptedException{
+　　for(int i = 1; i <= 5; i++){
+　　      List messageList = new ArrayList<KeyedMessage<String, String>>();
+　　      for(int j = 0; j < 4; j++）{
+　　          messageList.add(new KeyedMessage<String, String>("topic2", j+"", "The " + i + " message for key " + j));
+　　      }
+　　      producer.send(messageList);
+    }
+　　producer.close();
+}
+
+　　则key相同的消息会被发送并存储到同一个partition里，而且key的序号正好和Partition序号相同。（Partition序号从0开始，
+  本例中的key也从0开始）。下图所示是通过Java程序调用Consumer后打印出的消息列表。
+  
+  
